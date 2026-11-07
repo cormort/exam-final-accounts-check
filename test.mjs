@@ -16,7 +16,7 @@ const src = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1]
     .replace(/from 'https:\/\/cdnjs[^']*pdf\.min\.mjs'/, "from 'pdfjs-dist/legacy/build/pdf.mjs'")
     .replace(/^.*GlobalWorkerOptions.*$/m, '')
     .replace('https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/cmaps/', path.join(ROOT, 'node_modules/pdfjs-dist/cmaps/'))
-    .concat('\nexport { parseFile, runChecks, evalRule, checkTree, amt, toNum, valuesByColumn, chineseAmt, rowSums, readPages, treesOf, govMore, fundMore, hasWords, pdfjsLib, CMAP };\n');
+    .concat('\nexport { parseFile, runChecks, evalRule, checkTree, amt, toNum, valuesByColumn, chineseAmt, rowSums, compareVersions, readPages, treesOf, govMore, fundMore, hasWords, pdfjsLib, CMAP };\n');
 const bundle = path.join(ROOT, '.bundle.mjs');
 fs.writeFileSync(bundle, src);
 const api = await import(pathToFileURL(bundle));
@@ -92,10 +92,10 @@ assert.ok(api.runChecks(F0).every(r => r.group.startsWith('基金')));
 assert.ok(api.runChecks(G0).every(r => r.group.startsWith('公務')));
 assert.equal(api.runChecks(F0).length + api.runChecks(G0).length + 12, 149);
 
-// 表內散總：65 張表全部要讀得到且全部相符（114 年第 41 頁主管列印全 0 只提醒）
+// 表內散總：80 張表全部要讀得到且全部相符（114 年第 41 頁主管列印全 0 只提醒）
 const tr = Object.entries(trees).flatMap(([y, ts]) => ts.flatMap(t => api.checkTree(t).map(r => ({ ...r, year: +y }))));
 const tcount = k => tr.filter(r => r.result === k).length;
-assert.equal(Object.values(trees).flat().length, 65);
+assert.equal(Object.values(trees).flat().length, 80);
 // 111 年第 23 頁：減少 1,400 只印在機械及設備欄，合計欄空白；其他分析表、報告表五年都相符，超過門檻的也都有寫說明
 assert.deepEqual(more.map(l => `${l.name} ${l.diff}`), ['資產折舊明細表合計欄：期末帳面＝上年度＋新增－減少±調整－提列 -1400']);
 assert.equal(tcount('無法驗'), 0);
@@ -114,7 +114,8 @@ for (const [y, ts] of Object.entries(trees)) for (const t of ts) {
     });
 }
 console.log(`表內散總：${tcount('相符')} 張表全部相符；改動 1 元被抓到 ${cellFlips} 格`);
-assert.deepEqual(unchecked, []);
+// 基金主要表的賸餘列、現金流量各列不在母子關係內，由跨表規則或該列公式檢查
+assert.deepEqual(unchecked.filter(u => !/ (收支餘絀表|平衡表|現金流量表) /.test(u)), []);
 
 // 否證：拿掉備註文字，「未說明」提醒都要出現
 const load = async f => {
@@ -141,6 +142,17 @@ for (const f of fs.readdirSync(path.join(ROOT, 'examples')).filter(n => n.includ
     budget.push({ f, ...r });
 }
 assert.equal(budget.length, 17);
+// 版本比對：同一本對自己 0 差異，115 年公務案與法定要有差異
+const book = n => budget.find(b => b.f.startsWith(n));
+assert.equal(api.compareVersions(book('gov-budget-115-law'), book('gov-budget-115-law')).filter(x => x.result === '提醒').length, 0);
+const versions = api.compareVersions(book('gov-budget-115-bill'), book('gov-budget-115-law')).filter(x => x.result === '提醒');
+assert.ok(versions.length > 0);
+console.log(`115 年公務預算案對法定預算：${versions.length} 格不同`);
+// 公務對基金補助不超過基金補助收入
+for (const y of [112, 113, 114, 115, 116]) {
+    const r = api.runChecks({ ...book(`gov-budget-${y}-bill`).facts, ...book(`fund-budget-${y}-bill`).facts }).find(x => x.group.startsWith('公務↔基金預算'));
+    assert.equal(r.result, '相符');
+}
 {
     let ok = 0, moved = 0, ruleFlips = 0;
     const missed = [];
