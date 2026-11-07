@@ -917,6 +917,45 @@ function planTree(pages) {
     }
     return { title: '歲出計畫提要及分支計畫概況表', book: 'GB', cols: ['金額'], rows };
 }
+// 預算員額明細表：左頁各類人員本年度、上年度，右頁聘用、約僱、駐外雇員、合計與年需經費
+const STAFF = ['職員', '警察', '法警', '駐警', '工友', '技工', '駕駛', '聘用', '約僱', '駐外雇員', '合計'];
+function staffTree(pages) {
+    const rows = [], cols = [...STAFF.flatMap(c => [`${c}本年度`, `${c}上年度`]), '年需經費本年度', '年需經費上年度', '年需經費比較'];
+    for (const { left: l, right: r } of tablePages(pages, '預算員額', '明細表')) {
+        let code = null;
+        for (const row of l.rows) {
+            if (row.y < BODY_BOTTOM) continue;
+            const hit = row.cells.find(c => /^\d{10}$/.test(c.s.trim()));
+            if (hit) code = hit.s.trim();
+            const a = row.cells.filter(c => c.r > 165).map(tokenOf).filter(v => v !== null), b = (rowAt(r, row.y)?.cells ?? []).map(tokenOf).filter(v => v !== null);
+            if (a.length < 6 || !code) continue;
+            rows.push({ lev: zerosToLevel(code), code, name: label({ cells: row.cells.filter(c => c.r <= 165) }), n: [...a, ...b], page: l.no });
+            code = null;
+        }
+    }
+    return { title: '預算員額明細表', book: 'GB', cols, rows, formula: n => [
+        ['合計本年度＝各類人員', n[20], sum(n.slice(0, 20).filter((_, i) => i % 2 === 0))], ['合計上年度＝各類人員', n[21], sum(n.slice(0, 20).filter((_, i) => i % 2 === 1))],
+        ['年需經費比較＝本年度－上年度', n[24], n[22] - n[23]]] };
+}
+// 公務車輛明細表：合計＝各車；油料金額≈數量×單價（千元，四捨五入）
+function vehicleTree(pages) {
+    const rows = [], near = (row, r) => {   // 同一個數字可能被拆成相鄰兩格
+        const s = row.cells.filter(x => x.r > r - 20 && x.r <= r + 12 && tokenOf(x) !== null).map(x => x.s.trim()).join('');
+        return s ? tokenOf({ s }) ?? 0 : 0;
+    };
+    for (const p of tablePages(pages, '公務車輛明細表')) {
+        const R = [316, 411, 456, 503];   // 油料數量、金額、養護費、其他的右緣
+        for (const row of p.rows) {
+            if (row.y < BODY_BOTTOM) continue;
+            const name = label({ cells: row.cells.filter(c => c.r < 150) });
+            const total = name === '合計', first = row.cells[0], car = first && first.x < 60 && first.s.trim() === '1';
+            if (!total && !car) continue;
+            const unit = row.cells.map(c => c.s.trim()).find(s => /^\d+\.\d{2}$/.test(s));
+            rows.push({ lev: total ? -1 : 0, name: total ? '合計' : name, n: R.map(r => near(row, r)), unit: unit ? +unit : null, page: p.no });
+        }
+    }
+    return { title: '公務車輛明細表', book: 'GB', cols: ['油料數量(公升)', '油料金額', '養護費', '其他'], rows, tol: { 1: 3, 2: 3, 3: 3 } };   // 金額由元四捨五入成千元
+}
 // 各項費用彙計表：欄為工作計畫，表頭是工作計畫代碼
 function feeTrees(pages) {
     const out = [];
@@ -1029,6 +1068,14 @@ function govBudget(pages) {
     const fnTotal = fn.flatMap(({ left: l, right: r }) => l.rows.filter(x => label(x) === '總計').map(x => ints(rowAt(r, x.y)?.cells ?? []).at(-1))).filter(v => v !== undefined).at(-1);
     put('GB.職能.總計', fnTotal ?? null, `歲出按職能及經濟性綜合分類表（PDF 第 ${fn.at(-1)?.right.no} 頁）`);
 
+    // 預算員額：明細表合計＝公務車輛明細表下方的預算員額
+    const staff = staffTree(pages), car = vehicleTree(pages);
+    const staffTop = staff.rows.find(r => r.name === '考選部');
+    put('GB.員額.明細表', staffTop?.n[20], '預算員額明細表');
+    const footText = pages.map(p => p.rows.map(r => r.text).join('')).find(t => /預算員額:職員\d+人/.test(t));
+    put('GB.員額.車輛表', footText?.match(/合計:(\d+)人/) ? +footText.match(/合計:(\d+)人/)[1] : null, '公務車輛明細表下方');
+    for (const r of car.rows) if (r.unit && Math.abs(r.n[1] - r.n[0] * r.unit / 1000) > 1) lines.push(budgetBad('GB', `公務車輛明細表｜${r.name}：油料金額＝數量×單價`, r.n[1], Math.round(r.n[0] * r.unit / 1000), `PDF 第 ${r.page} 頁`));
+
     const feeOf = code => { const r = fee.flatMap(t => t.rows.filter(x => x.code === code)).flatMap(x => x.n); return r.length ? sum(r) : null; };
     put('GB.費用.4030', feeOf('4030'), '各項費用彙計表');
 
@@ -1044,7 +1091,7 @@ function govBudget(pages) {
         if (bySub.get(k) !== r.n[i]) lines.push(budgetBad('GB', `各項費用彙計表｜${c}｜${r.name}：與計畫提要相符`, r.n[i], bySub.get(k), `PDF 第 ${r.page} 頁`));
     });
     if (compared) lines.push(passLine('GB', `各項費用彙計表：${compared} 個科目對歲出計畫提要`));
-    return { facts, lines, trees: [rev, exp, plan, ...fee].filter(t => t.rows.length) };
+    return { facts, lines, trees: [rev, exp, plan, ...fee, staff, car].filter(t => t.rows.length) };
 }
 
 // 基金各表：科目文字的左緣就是層級（比照 cb-budget-parser 的母子散總）；資產、負債、淨值字距拉開，另當最上層
@@ -1132,6 +1179,11 @@ function fundBudget(pages) {
     put('FB.折舊.前年度', dep(/^前年度決算資產原值/), depS); put('FB.折舊.上年度增減', dep(/^上年度預計增減資產原值/), depS); put('FB.折舊.本年度增減', dep(/^本年度預計增減資產原值/), depS);
     put('FB.折舊.總額', dep(/^本年度\(12月底\)止資產總額/), depS); put('FB.折舊.應提', dep(/^本年度應提折舊額/), depS);
     put('FB.費用.折舊', FEE(/^不動產、廠房及設備折舊$/)?.[2], eS);
+    // 員工人數、用人費用彙計表：有資料列才能驗；本基金表身空白時，費用彙計表也不該有用人費用
+    const blankBody = (a, b) => (b ? tablePages(pages, a, b).flatMap(s => [s.left, s.right]) : tablePages(pages, a)).every(p => !p.rows.some(r => r.y >= BODY_BOTTOM && /^(合計|總計)$/.test(label(r)) && ints(r.cells).length));
+    const noStaff = blankBody('員工人數彙計表') && blankBody('考選業', '務基金');
+    put('FB.費用.用人費用', FEE(/^用人費用$/)?.[2] ?? 0, eS);
+    if (noStaff) lines.push(passLine('FB', '員工人數、用人費用彙計表：表身空白（本基金未列編制員工），僅有備註'));
     const trees = [
         levelTree(tablePages(pages, '收支餘絀預計表'), 'FB', '收支餘絀預計表', 8, [0, 2, 4, 6], ['前年度決算數', '本年度預算數', '上年度預算數', '比較增減'], { 0: 3 }, n => [['比較增減＝本年度－上年度', n[3], n[1] - n[2]]]),
         levelTree(tablePages(pages, '餘絀撥補預計表'), 'FB', '餘絀撥補預計表', 4, [0, 2], ['上年度預算數', '本年度預算數']),
@@ -1273,6 +1325,7 @@ rule(GB, '各項費用彙計表人事費＝人事費彙計表', ['GB.費用.人�
 rule(GB, '資本支出分析表合計＝一級用途別資本小計', ['GB.資本.合計'], ['GB.用途.資本小計']);
 for (const t of ['補助經費分析表', '捐助經費分析表', '委辦經費分析表']) rule(GB, `${t}：合計＝各項`, [`GB.${t}.合計`], [`GB.${t}.各項`]);
 rule(GB, '補助經費分析表合計＝各項費用彙計表對特種基金之補助', ['GB.補助經費分析表.合計'], ['GB.費用.4030']);
+rule(GB, '預算員額明細表合計＝公務車輛明細表下方預算員額', ['GB.員額.明細表'], ['GB.員額.車輛表']);
 rule(GB, '歲出按職能分類表總計＝歲出機關別預算表', ['GB.職能.總計'], ['GB.機關.考選部']);
 for (const c of ['本', '上', '決算']) {
     rule(FB, `業務賸餘＝業務收入－業務成本與費用（${c}）`, [`FB.收支.業務賸餘.${c}`], [`FB.收支.業務收入.${c}`, `-FB.收支.業務成本.${c}`], c === '決算' ? 2 : 0);
@@ -1299,6 +1352,7 @@ rule(FB, '現金流量增加固資＝固定資產擴充明細表', ['FB.現金.�
 rule(FB, '固定資產擴充明細表＝資金來源明細表', ['FB.擴充.合計'], ['FB.資金.合計']);
 rule(FB, '基金數額增減明細表期末＝預計平衡表基金', ['FB.基金.期末'], ['FB.平衡.基金.本']);
 for (const k of ['勞務收入', '其他業務收入', '財務收入', '其他業務外收入']) rule(FB, `收支餘絀預計表＝${k}明細表`, ['FB.收支明.' + k], ['FB.明細.' + k]);
+rule(FB, '用人費用彙計表空白時，各項費用彙計表用人費用為 0', ['FB.費用.用人費用'], []);
 rule(FB, '資產折舊明細表本年度增減＝固定資產擴充明細表', ['FB.折舊.本年度增減'], ['FB.擴充.合計']);
 rule(FB, '資產折舊明細表：年底總額＝前年度＋上年度＋本年度增減', ['FB.折舊.總額'], ['FB.折舊.前年度', 'FB.折舊.上年度增減', 'FB.折舊.本年度增減']);
 rule(FB, '資產折舊明細表應提折舊＝各項費用彙計表', ['FB.折舊.應提'], ['FB.費用.折舊']);
