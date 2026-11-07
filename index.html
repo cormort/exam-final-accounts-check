@@ -43,14 +43,47 @@
     tr.grp td { background: var(--default-100); font-weight: 600; }
     .ok { color: var(--success-600); } .bad { color: var(--danger-600); font-weight: 600; background: var(--danger-50); } .na { color: var(--warning-700); }
     .sub { color: var(--fg-500); font-size: 12.5px; }
+    .note ul { margin: 6px 0 0; padding-left: 20px; }
+    .chk { margin: 10px 0; padding: 10px 14px; border-radius: var(--r-md); font-size: 13.5px; line-height: 1.7; background: var(--danger-50); }
+    .chk.pass { background: #e8faf0; }
+    .tabs { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; margin: 12px 0; }
+    .tab-sep { grid-column: 1 / -1; color: var(--fg-500); font-size: 12.5px; margin-top: 6px; }
+    .tab { height: auto; min-height: 46px; padding: 6px 10px; text-align: left; color: var(--fg); background: var(--default-100); font-size: 13px; line-height: 1.35; }
+    .tab small { display: block; color: var(--fg-500); font-size: 11.5px; }
+    .tab.active { color: #fff; background: var(--primary); } .tab.active small { color: #dbe8ff; }
+    .tab.dim { opacity: .4; }
+    #search { flex: 1; min-width: 200px; height: 38px; border-radius: var(--r-md); border: 1px solid var(--divider); padding: 0 10px; font-size: 14px; }
+    tr.flag td { background: var(--danger-50); }
+    td.pick { cursor: pointer; } td.pick:hover { background: var(--default-100); }
+    td.pick[data-s="1"] { color: #fff; background: var(--success-600); }
+    td.pick[data-s="2"] { color: #fff; background: var(--danger-600); }
+    .mark { width: 24px; height: 24px; padding: 0; border-radius: 50%; color: var(--fg-500); background: none; border: 1.5px dashed var(--fg-500); font-size: 13px; line-height: 1; }
+    .mark[data-s="1"] { color: #fff; background: var(--success-600); border: none; }
+    .mark[data-s="2"] { color: #fff; background: var(--danger-600); border: none; }
+    .mark[data-s="3"] { color: #fff; background: var(--primary); border: none; }
+    .rowcheck { position: sticky; top: 0; z-index: 2; margin: 8px 0; padding: 8px 10px; background: var(--default-100); border-radius: var(--r-md); }
+    .rowcheck table { font-size: 13px; }
+    .rowcheck button { height: 28px; font-size: 12.5px; margin-top: 6px; }
+    #calc { position: fixed; right: 16px; bottom: 16px; z-index: 50; width: 270px; max-width: calc(100vw - 32px); background: var(--content); border: 1px solid var(--divider); border-radius: var(--r-md); box-shadow: 0 8px 28px rgba(0,0,0,.18); font-size: 13px; }
+    #calcBar { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; font-weight: 600; background: var(--default-100); border-radius: var(--r-md) var(--r-md) 0 0; cursor: move; touch-action: none; }
+    #calcBar button { height: 24px; padding: 0 8px; color: var(--fg); background: none; }
+    #calcBody { padding: 10px 12px; }
+    #calcSum { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    #calcInfo { color: var(--fg-500); margin: 2px 0 8px; }
+    #calcClear { height: 30px; font-size: 13px; }
 </style>
 </head>
 <body>
 <div class="container">
     <h1>考選部決算勾稽工具</h1>
     <p>上傳一本考選部單位決算（公務）或考選業務基金附屬單位決算，檢查表內上下層級的散總合計與表間勾稽；兩本各自獨立，可只放一本。PDF 只在瀏覽器內解析，不會上傳。</p>
-    <div class="note">⚠ 這是提醒工具不是查核結論。「不符」可能是決算書的問題，也可能是解析錯，請回原頁確認；缺值標「無法驗」，不當 0。
-        補助收入拆分取自基金總說明文字，其餘取自報表。</div>
+    <div class="note"><strong>⚠ 使用前請先讀</strong>
+        <ul>
+            <li>金額取自原文，但版面判讀是程式推論：科目階層與欄位依 PDF 上的座標推算，引用前請回原始 PDF 確認。</li>
+            <li>這是提醒工具不是查核結論：「不符」可能是決算書的問題，也可能是解析錯；缺值標「無法驗」，不當 0。</li>
+            <li>規則都以 110–114 年度 10 份決算書實測過；工具只檢查列出的表與關係，其餘報表仍要人工核對。</li>
+            <li>「提醒」不是金額錯誤：只看備註欄有沒有文字，不判斷內容。補助收入拆分取自基金總說明文字，其餘取自報表。</li>
+        </ul></div>
     <div class="drops">
         <label class="drop">公務決算<small>拖曳 PDF 到這裡，或點選選檔</small><input type="file" id="gov" accept="application/pdf"></label>
         <label class="drop">基金決算<small>拖曳 PDF 到這裡，或點選選檔</small><input type="file" id="fund" accept="application/pdf"></label>
@@ -61,7 +94,8 @@
     <div class="bar">
         <button id="run" disabled>解析並檢覈</button>
         <button id="xlsx" disabled>匯出 xlsx</button>
-        <select id="filter" aria-label="明細篩選">
+        <input type="search" id="search" placeholder="輸入科目或項目名稱篩選…" aria-label="篩選科目或項目">
+        <select id="filter" aria-label="檢核結果篩選">
             <option value="">顯示全部</option>
             <option value="不符">只看不符</option>
             <option value="無法驗">只看無法驗</option>
@@ -70,6 +104,15 @@
     </div>
     <div id="msg" aria-live="polite"></div>
     <div id="out"></div>
+</div>
+<div id="calc" hidden>
+    <div id="calcBar">🧮 點擊計算機<button id="calcClose" aria-label="關閉計算機">✕</button></div>
+    <div id="calcBody">
+        <div id="calcSum" aria-live="polite">0</div>
+        <div id="calcZh"></div>
+        <div id="calcInfo"></div>
+        <button id="calcClear">清除全部</button>
+    </div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"
@@ -492,7 +535,7 @@ function checkTree(t) {
     return [
         ...bad.map(({ r, label, a, b }) => {
             const src = `${t.title}（PDF 第 ${r.page} 頁）`;
-            return line(`${t.title}｜${r.name}｜${label}`, side(a, src), side(b, src), a - b, '不符');
+            return { ...line(`${t.title}｜${r.name}｜${label}`, side(a, src), side(b, src), a - b, '不符'), row: r };
         }),
         ...(bad.length ? [] : [line(`${t.title}：${cells} 格全部相符（${where}）`, side(null), side(null), 0, '相符')]),
         ...(skipped ? [line(`${t.title}：${skipped} 列欄數與表頭不符，未檢查`, side(null), side(null), null, '無法驗')] : []),
@@ -534,7 +577,7 @@ function govBalanceTree(pages) {
         if (n.length < 2) n = ints((p.rows[i + 1]?.cells ?? []).filter(side));
         rows.push({ lev: { 1: 0, 2: 1, 6: 2 }[hit[1].length] ?? 0, code: hit[1], name: hit[1], n: n.slice(0, 2), page: p.no });
     });
-    return { title: '公務平衡表', book: 'G', cols: ['本年度', '上年度'], rows };
+    return { title: '平衡表', book: 'G', cols: ['本年度', '上年度'], rows };
 }
 const treesOf = (book, pages) => (book === 'F'
     ? FUND_TREES.map(t => fundTree(pages, { ...t, book }))
@@ -955,21 +998,125 @@ async function parseFile(data) {
 const $ = id => document.getElementById(id);
 const fmt = v => (v === null || v === undefined ? '—' : v.toLocaleString('en-US'));
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-let results = [], year = null;
+let results = [], year = null, shownTrees = [];
 
 const sideText = s => s.parts.map(p => `${p.neg ? '−' : ''}${fmt(p.v)}${p.src ? `〔${p.src}〕` : `〔缺：${p.term}〕`}`).join(' ');
-function render() {
-    const c = k => results.filter(r => r.result === k).length;
+const pagesOf = t => { const n = [...new Set(t.rows.map(r => r.page))]; return n.length ? `第 ${n[0]}${n.length > 1 ? '–' + n.at(-1) : ''} 頁` : ''; };
+const treeBook = t => (t.book === 'F' ? '基金' : '公務');
+// 點擊計算機：點數字循環 ＋ → － → 取消，可跨表
+const picks = new Map();
+const pickCell = (k, v, title) => `<td class="n pick" tabindex="0" role="button" data-k="${k}" data-s="${picks.get(k)?.s ?? 0}" title="${esc(title)}">${fmt(v)}</td>`;
+function chineseAmt(v) {
+    const a = Math.abs(v), yi = Math.floor(a / 1e8), wan = Math.floor(a % 1e8 / 1e4), yuan = a % 1e4;
+    const t = n => n.toLocaleString('en-US');
+    return (v < 0 ? '負 ' : '') + (yi ? t(yi) + '億' : '') + (wan ? t(wan) + '萬' : '') + (yuan || !a ? t(yuan) : '') + '元';
+}
+function calcTotal() {
+    const signed = [...picks.values()].map(p => (p.s === 1 ? p.v : -p.v));
+    return { total: sum(signed), count: signed.length, signed };
+}
+function updateCalc() {
+    const { total, count, signed } = calcTotal();
+    $('calcSum').textContent = fmt(total);
+    $('calcZh').textContent = chineseAmt(total);
+    const neg = signed.length === 2 && signed[0] * signed[1] < 0 ? Math.abs(signed.find(v => v < 0)) : 0;
+    $('calcInfo').textContent = `已選 ${count} 個數字` + (neg ? `（差異為減項金額的 ${(total / neg * 100).toFixed(2)}%）` : '');
+    if (count) $('calc').hidden = false;
+}
+function togglePick(td) {
+    const k = td.dataset.k, s = ((picks.get(k)?.s ?? 0) + 1) % 3;
+    const [ti, ri, ci] = k.split(':').map(Number);
+    if (s) picks.set(k, { s, v: shownTrees[ti].rows[ri].n[ci] }); else picks.delete(k);
+    td.dataset.s = s;
+    updateCalc();
+}
+function clearCalc() {
+    picks.clear();
+    document.querySelectorAll('td.pick').forEach(td => { td.dataset.s = 0; });
+    updateCalc();
+}
+function resultPanel() {
     const f = $('filter').value, shown = f ? results.filter(r => r.result === f) : results;
-    let h = `<h2>${year} 年度：共 ${results.length} 項，相符 ${c('相符')}、不符 ${c('不符')}、無法驗 ${c('無法驗')}${c('提醒') ? `、提醒 ${c('提醒')}` : ''}</h2>
-        <div class="scroll"><table><thead><tr><th>勾稽項目</th><th>左式</th><th>右式</th><th>差額</th><th>結果</th><th>出處</th></tr></thead><tbody>`;
+    let h = `<div class="scroll"><table><thead><tr><th>勾稽項目</th><th>左式</th><th>右式</th><th>差額</th><th>結果</th><th>出處</th></tr></thead><tbody>`;
     for (const g of new Set(shown.map(r => r.group))) {
         h += `<tr class="grp"><td colspan="6">${g}</td></tr>`;
         h += shown.filter(r => r.group === g).map(r => `<tr><td>${esc(r.name)}</td><td class="n">${fmt(r.left.v)}</td><td class="n">${fmt(r.right.v)}</td><td class="n">${fmt(r.diff)}</td>
             <td class="${r.result === '相符' ? 'ok' : r.result === '不符' ? 'bad' : 'na'}">${r.result}</td>
             <td class="sub">${esc(sideText(r.left))}<br>${esc(sideText(r.right))}</td></tr>`).join('');
     }
-    $('out').innerHTML = h + '</tbody></table></div>';
+    return h + '</tbody></table></div>';
+}
+// 整列標記：空 → ＋ → － → ＝，同一張表內每欄一次驗算
+const MARKS = ['', '＋', '－', '＝'];
+const marks = new Map();
+const markOf = (ti, ri) => marks.get(`${ti}:${ri}`) ?? 0;
+function rowSums(t, stateOf) {
+    const used = t.rows.map((r, ri) => ({ r, s: stateOf(ri) })).filter(x => x.s && x.r.n.length);
+    const col = (i, keep, sign) => sum(used.filter(keep).map(x => sign(x.s) * (x.r.n[i] ?? 0)));
+    const detail = t.cols.map((_, i) => col(i, x => x.s !== 3, s => (s === 1 ? 1 : -1)));
+    const total = t.cols.map((_, i) => col(i, x => x.s === 3, () => 1));
+    return { count: used.length, hasTotal: used.some(x => x.s === 3), detail, total, diff: detail.map((v, i) => v - total[i]) };
+}
+function rowCheckHtml(t, ti) {
+    const r = rowSums(t, ri => markOf(ti, ri));
+    if (!r.count) return '點每列最前面的圓鈕標記：＋、－ 是明細，＝ 是總計列，每一欄會立刻算出差額。';
+    const line = (name, vals, cls) => `<tr><td>${name}</td>${vals.map((v, i) => `<td class="n ${cls?.(i) ?? ''}">${fmt(v)}</td>`).join('')}</tr>`;
+    return `<div class="scroll"><table><thead><tr><th>已標 ${r.count} 列</th>${t.cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>
+        ${line('明細合計', r.detail)}${r.hasTotal ? line('＝ 列', r.total) + line('差額', r.diff, i => (r.diff[i] ? 'bad' : 'ok')) : ''}</tbody></table></div>
+        <button class="clearMarks" data-t="${ti}">清除本表標記</button>`;
+}
+function toggleMark(btn) {
+    const [ti, ri] = btn.dataset.k.split(':').map(Number), s = (markOf(ti, ri) + 1) % 4;
+    if (s) marks.set(btn.dataset.k, s); else marks.delete(btn.dataset.k);
+    btn.dataset.s = s; btn.textContent = MARKS[s];
+    document.querySelector(`.rowcheck[data-t="${ti}"]`).innerHTML = rowCheckHtml(shownTrees[ti], ti);
+}
+function clearMarks(ti) {
+    for (const k of [...marks.keys()]) if (k.startsWith(ti + ':')) marks.delete(k);
+    document.querySelectorAll(`.panel[data-tab="${ti + 1}"] .mark`).forEach(b => { b.dataset.s = 0; b.textContent = ''; });
+    document.querySelector(`.rowcheck[data-t="${ti}"]`).innerHTML = rowCheckHtml(shownTrees[ti], ti);
+}
+function treePanel(t, ti) {
+    const flagged = new Set(results.filter(r => r.row).map(r => r.row));
+    const body = t.rows.map((r, ri) => `<tr class="${flagged.has(r) ? 'flag' : ''}"><td>${r.n.length ? `<button class="mark" data-k="${ti}:${ri}" data-s="${markOf(ti, ri)}" aria-label="標記 ${esc(r.name)}">${MARKS[markOf(ti, ri)]}</button>` : ''}</td><td style="padding-left:${10 + Math.max(r.lev, 0) * 14}px;white-space:nowrap">${esc(r.name)}</td>
+        ${t.cols.map((c, i) => (r.n.length ? pickCell(`${ti}:${ri}:${i}`, r.n[i], `${r.name}｜${c}`) : '<td></td>')).join('')}<td class="sub">${r.page}</td></tr>`).join('');
+    return `<div class="rowcheck sub" data-t="${ti}">${rowCheckHtml(t, ti)}</div>
+        <div class="scroll"><table><thead><tr><th>標記</th><th>科目</th>${t.cols.map(c => `<th>${esc(c)}</th>`).join('')}<th>PDF 頁</th></tr></thead><tbody>${body}</tbody></table></div>`;
+}
+function showTab(i) {
+    document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', +b.dataset.tab === i));
+    document.querySelectorAll('.panel').forEach(p => { p.hidden = +p.dataset.tab !== i; });
+}
+function applySearch() {
+    const q = $('search').value.trim();
+    document.querySelectorAll('.panel').forEach(p => {
+        let hits = 0;
+        p.querySelectorAll(':scope > .scroll tbody tr:not(.grp)').forEach(tr => { const hit = !q || tr.textContent.includes(q); tr.hidden = !hit; if (hit) hits++; });
+        document.querySelector(`.tab[data-tab="${p.dataset.tab}"]`).classList.toggle('dim', !!q && !hits);
+        p.dataset.hits = hits;
+    });
+    const now = document.querySelector('.panel:not([hidden])');
+    if (q && now?.dataset.hits === '0') { const hit = [...document.querySelectorAll('.panel')].find(p => p.dataset.hits !== '0'); if (hit) showTab(+hit.dataset.tab); }
+}
+function render() {
+    const c = k => results.filter(r => r.result === k).length;
+    const bad = results.filter(r => r.result === '不符'), keep = +(document.querySelector('.tab.active')?.dataset.tab ?? 0);
+    const list = bad.slice(0, 20).map(r => `<div>${esc(r.name)}：左 ${fmt(r.left.v)}，右 ${fmt(r.right.v)}，相差 ${fmt(r.diff)}</div>`).join('');
+    const tabs = [`<button class="tab" data-tab="0">檢核結果<small>共 ${results.length} 項${bad.length ? `・${bad.length} 不符 ⚠` : ''}</small></button>`];
+    let last = null;
+    shownTrees.forEach((t, i) => {
+        if (treeBook(t) !== last) { last = treeBook(t); tabs.push(`<span class="tab-sep">${last}決算書表</span>`); }
+        const mark = results.some(r => r.row && t.rows.includes(r.row)) ? ' ⚠' : '';
+        tabs.push(`<button class="tab" data-tab="${i + 1}">${esc(t.title)}<small>${pagesOf(t)}${mark}</small></button>`);
+    });
+    $('out').innerHTML = `<h2>${year} 年度：共 ${results.length} 項，相符 ${c('相符')}、不符 ${c('不符')}、無法驗 ${c('無法驗')}${c('提醒') ? `、提醒 ${c('提醒')}` : ''}</h2>
+        <div class="chk ${bad.length ? '' : 'pass'}"><b>${bad.length ? `${bad.length} 項不符，請回原頁確認` : '金額關係全部相符'}</b>${list}${bad.length > 20 ? `<div>…另有 ${bad.length - 20} 項</div>` : ''}</div>
+        <div class="tabs">${tabs.join('')}</div>
+        <div class="panel" data-tab="0">${resultPanel()}</div>
+        ${shownTrees.map((t, i) => `<div class="panel" data-tab="${i + 1}" hidden><p class="sub">點數字可加入計算機（＋、－、取消），可跨表計算。</p>${treePanel(t, i)}</div>`).join('')}`;
+    document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => showTab(+b.dataset.tab)));
+    showTab(keep);
+    applySearch();
 }
 function exportXlsx() {
     const rows = results.map(r => ({
@@ -978,6 +1125,10 @@ function exportXlsx() {
     }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), `${year}年度勾稽`);
+    for (const t of shownTrees) {
+        const sheet = t.rows.map(r => ({ 科目: r.name, ...Object.fromEntries(t.cols.map((c, i) => [c, r.n[i] ?? null])), PDF頁: r.page }));
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheet), `${treeBook(t)}${t.title}`.replace(/[\\/?*[\]:]/g, '').slice(0, 31));
+    }
     XLSX.writeFile(wb, `考選部${year}年度決算勾稽.xlsx`);
 }
 function say(text, err) { $('msg').textContent = text; $('msg').className = err ? 'err' : ''; }
@@ -996,6 +1147,8 @@ async function run() {
         if (parsed.length === 2 && parsed[0].book === parsed[1].book) throw new Error('兩份是同一種決算書，請各放一份公務、基金');
         if (parsed.length === 2 && parsed[0].year !== parsed[1].year) throw new Error(`年度不同：${parsed[0].year} 與 ${parsed[1].year}`);
         year = parsed[0].year;
+        shownTrees = parsed.flatMap(p => p.trees).filter(t => t.rows.length);
+        picks.clear(); marks.clear(); $('calc').hidden = true;
         const checks = runChecks(Object.assign({}, ...parsed.map(p => p.facts)));
         results = [...parsed.flatMap(p => [...p.trees.flatMap(checkTree), ...p.more]), ...checks.filter(r => r.group !== X), ...checks.filter(r => r.group === X)];
         say('完成');
@@ -1037,7 +1190,22 @@ $('gov').addEventListener('change', ready);
 $('fund').addEventListener('change', ready);
 $('run').addEventListener('click', run);
 $('xlsx').addEventListener('click', exportXlsx);
-$('filter').addEventListener('change', () => results.length && render());
+$('filter').addEventListener('change', () => { if (results.length) { render(); showTab(0); } });
+$('search').addEventListener('input', () => results.length && applySearch());
+$('out').addEventListener('click', e => {
+    const td = e.target.closest('td.pick'), mark = e.target.closest('.mark'), clear = e.target.closest('.clearMarks');
+    if (td) togglePick(td); else if (mark) toggleMark(mark); else if (clear) clearMarks(+clear.dataset.t);
+});
+$('out').addEventListener('keydown', e => { const td = e.target.closest('td.pick'); if (td && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); togglePick(td); } });
+$('calcClear').addEventListener('click', clearCalc);
+$('calcClose').addEventListener('click', () => { $('calc').hidden = true; });
+$('calcBar').addEventListener('pointerdown', e => {
+    if (e.target.id === 'calcClose') return;
+    const box = $('calc'), r = box.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
+    const move = m => Object.assign(box.style, { left: m.clientX - dx + 'px', top: m.clientY - dy + 'px', right: 'auto', bottom: 'auto' });
+    const stop = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', stop); };
+    addEventListener('pointermove', move); addEventListener('pointerup', stop);
+});
 </script>
 </body>
 </html>

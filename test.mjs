@@ -16,7 +16,7 @@ const src = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1]
     .replace(/from 'https:\/\/cdnjs[^']*pdf\.min\.mjs'/, "from 'pdfjs-dist/legacy/build/pdf.mjs'")
     .replace(/^.*GlobalWorkerOptions.*$/m, '')
     .replace('https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/cmaps/', path.join(ROOT, 'node_modules/pdfjs-dist/cmaps/'))
-    .concat('\nexport { parseFile, runChecks, evalRule, checkTree, amt, toNum, valuesByColumn, readPages, treesOf, govMore, fundMore, hasWords, pdfjsLib, CMAP };\n');
+    .concat('\nexport { parseFile, runChecks, evalRule, checkTree, amt, toNum, valuesByColumn, chineseAmt, rowSums, readPages, treesOf, govMore, fundMore, hasWords, pdfjsLib, CMAP };\n');
 const bundle = path.join(ROOT, '.bundle.mjs');
 fs.writeFileSync(bundle, src);
 const api = await import(pathToFileURL(bundle));
@@ -26,6 +26,11 @@ fs.unlinkSync(bundle);
 assert.equal(api.amt('1億4,983萬8,493'), 149838493);
 assert.equal(api.amt('5,450萬'), 54500000);
 assert.equal(api.toNum('- 2,658,110'), -2658110);
+assert.equal(api.chineseAmt(149838493), '1億4,983萬8,493元');
+assert.equal(api.chineseAmt(-54500000), '負 5,450萬元');
+assert.equal(api.chineseAmt(0), '0元');
+const rs0 = api.rowSums({ cols: ['甲', '乙'], rows: [{ n: [10, 1] }, { n: [3, 1] }, { n: [] }, { n: [7, 1] }] }, ri => [1, 2, 1, 3][ri]);
+assert.deepEqual([rs0.count, rs0.detail, rs0.total, rs0.diff], [3, [7, 0], [7, 1], [0, -1]]);
 assert.deepEqual(api.valuesByColumn({ cells: [{ r: 201, s: '-' }, { r: 358, s: '-' }, { r: 408, s: '92,529,794' }] }, [209, 347, 408]), [0, null, -92529794]);
 
 const byYear = {}, trees = {}, more = [];
