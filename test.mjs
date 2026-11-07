@@ -16,7 +16,7 @@ const src = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1]
     .replace(/from 'https:\/\/cdnjs[^']*pdf\.min\.mjs'/, "from 'pdfjs-dist/legacy/build/pdf.mjs'")
     .replace(/^.*GlobalWorkerOptions.*$/m, '')
     .replace('https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/cmaps/', path.join(ROOT, 'node_modules/pdfjs-dist/cmaps/'))
-    .concat('\nexport { parseFile, runChecks, evalRule, checkTree, amt, toNum, valuesByColumn };\n');
+    .concat('\nexport { parseFile, runChecks, evalRule, checkTree, amt, toNum, valuesByColumn, readPages, treesOf, govMore, fundMore, hasWords, pdfjsLib, CMAP };\n');
 const bundle = path.join(ROOT, '.bundle.mjs');
 fs.writeFileSync(bundle, src);
 const api = await import(pathToFileURL(bundle));
@@ -28,12 +28,13 @@ assert.equal(api.amt('5,450萬'), 54500000);
 assert.equal(api.toNum('- 2,658,110'), -2658110);
 assert.deepEqual(api.valuesByColumn({ cells: [{ r: 201, s: '-' }, { r: 358, s: '-' }, { r: 408, s: '92,529,794' }] }, [209, 347, 408]), [0, null, -92529794]);
 
-const byYear = {}, trees = {};
+const byYear = {}, trees = {}, more = [];
 for (const f of fs.readdirSync(path.join(ROOT, 'examples')).sort().reverse()) {   // 同年度公務表在前
     const r = await api.parseFile(new Uint8Array(fs.readFileSync(path.join(ROOT, 'examples', f))));
     assert.ok(r, '無法辨識 ' + f);
     (byYear[r.year] ??= {})[r.book] = r.facts;
     (trees[r.year] ??= []).push(...r.trees);
+    more.push(...r.more);
 }
 // 上年度欄＝前一本的本年度：同一數字由兩本 PDF 各取一次，對得上才算沒取錯
 const Y = '跨年度（僅驗證用）';
@@ -78,18 +79,20 @@ assert.deepEqual(rs.filter(r => r.result === '不符').map(r => `${r.year} ${r.n
 assert.deepEqual(rs.filter(r => r.result === '無法驗').map(r => `${r.year} ${r.name}`), [
     '110 現金流量增加無形資產＝無形資產明細表決算', '111 現金流量增加無形資產＝無形資產明細表決算',   // 這兩年沒有此表
 ]);
-assert.equal(summary.total, 5 * 80 + 4 * 8);   // 每年 80 條＋4 組相鄰年度各 8 條
+assert.equal(summary.total, 5 * 149 + 4 * 8);   // 每年 149 條＋4 組相鄰年度各 8 條
 
 // 兩本各自獨立：只放一本時不跑另一本與跨書規則
 const F0 = byYear[114].F, G0 = byYear[114].G;
 assert.ok(api.runChecks(F0).every(r => r.group.startsWith('基金')));
 assert.ok(api.runChecks(G0).every(r => r.group.startsWith('公務')));
-assert.equal(api.runChecks(F0).length + api.runChecks(G0).length + 12, 80);
+assert.equal(api.runChecks(F0).length + api.runChecks(G0).length + 12, 149);
 
-// 表內散總：55 張表全部要讀得到且全部相符（114 年第 41 頁主管列印全 0 只提醒）
+// 表內散總：65 張表全部要讀得到且全部相符（114 年第 41 頁主管列印全 0 只提醒）
 const tr = Object.entries(trees).flatMap(([y, ts]) => ts.flatMap(t => api.checkTree(t).map(r => ({ ...r, year: +y }))));
 const tcount = k => tr.filter(r => r.result === k).length;
-assert.equal(Object.values(trees).flat().length, 55);
+assert.equal(Object.values(trees).flat().length, 65);
+// 111 年第 23 頁：減少 1,400 只印在機械及設備欄，合計欄空白；其他分析表、報告表五年都相符，超過門檻的也都有寫說明
+assert.deepEqual(more.map(l => `${l.name} ${l.diff}`), ['資產折舊明細表合計欄：期末帳面＝上年度＋新增－減少±調整－提列 -1400']);
 assert.equal(tcount('無法驗'), 0);
 assert.deepEqual(tr.filter(r => r.result === '不符').map(r => `${r.year} ${r.name} ${r.diff}`), []);
 assert.deepEqual(tr.filter(r => r.result === '提醒').map(r => `${r.year} ${r.name}`), ['114 以前年度歲出機關別轉入數決算表｜考試院主管：標題列印成 0，通常應留白，金額不受影響（PDF 第 41 頁）']);
@@ -107,6 +110,23 @@ for (const [y, ts] of Object.entries(trees)) for (const t of ts) {
 }
 console.log(`表內散總：${tcount('相符')} 張表全部相符；改動 1 元被抓到 ${cellFlips} 格`);
 assert.deepEqual(unchecked, []);
+
+// 否證：拿掉備註文字，「未說明」提醒都要出現
+const load = async f => {
+    const doc = await api.pdfjsLib.getDocument({ data: new Uint8Array(fs.readFileSync(path.join(ROOT, 'examples', f))), ...api.CMAP, verbosity: 0 }).promise;
+    return api.readPages(doc);
+};
+const strip = (pages, title, keep = () => false) => { for (const p of pages) if (p.head.includes(title)) for (const r of p.rows) r.cells = r.cells.filter(c => !api.hasWords(c) || c.x < 200 || keep(c)); };
+const reminds = async (f, book, titles, want) => {
+    const pages = await load(f);
+    for (const t of titles) strip(pages, t, c => /\d{10}-/.test(c.s));
+    return (book === 'F' ? api.fundMore : api.govMore)(pages, api.treesOf(book, pages)).lines.filter(l => l.result === '提醒' && l.name.startsWith(want)).length;
+};
+assert.ok(await reminds('gov-113.pdf', 'G', ['分析表'], '人事費分析表') > 0);
+assert.ok(await reminds('gov-114.pdf', 'G', ['歲入餘絀(或減免、註銷)分析表'], '歲入餘絀分析表') > 0);
+assert.ok(await reminds('fund-111.pdf', 'F', ['主要營運項目執行績效摘要表'], '主要營運項目') > 0);
+assert.ok(await reminds('fund-111.pdf', 'F', ['管制性項目及統計所需項目比較表'], '管制性項目') > 0);
+assert.ok(await reminds('fund-110.pdf', 'F', ['業務外收入明細表'], '業務外收入明細表') > 0);
 
 // 否證：每條規則的每個取數都改動 1 元，該規則都要變不符（防止比到同一個數或恆真）
 let flips = 0;
