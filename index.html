@@ -20,6 +20,13 @@
     h2 { font-size: 17px; margin: 28px 0 8px; }
     p { color: var(--fg-500); font-size: 14px; }
     .note { background: var(--warning-50); color: var(--warning-700); padding: 10px 14px; border-radius: var(--r-md); font-size: 13.5px; line-height: 1.6; }
+    .drops { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin: 14px 0; }
+    .drop { position: relative; display: block; padding: 22px 16px; text-align: center; border: 2px dashed var(--divider); border-radius: var(--r-md); font-size: 15px; font-weight: 600; }
+    .drop small { display: block; margin-top: 6px; color: var(--fg-500); font-size: 13px; font-weight: 400; overflow-wrap: anywhere; }
+    .drop:hover, .drop.over, .drop:focus-within { border-color: var(--primary); background: var(--default-100); }
+    .drop.has { border-style: solid; border-color: var(--success-600); }
+    /* 透明的原生檔案欄蓋滿整區：點選、拖放、鍵盤都由瀏覽器處理 */
+    .drop input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
     .bar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 14px 0; }
     button { padding: 0 16px; height: 38px; color: #fff; background: var(--primary); border: none; border-radius: var(--r-md); cursor: pointer; font-size: 14px; }
     button:disabled { opacity: .45; cursor: default; }
@@ -42,9 +49,11 @@
     <p>上傳一本考選部單位決算（公務）或考選業務基金附屬單位決算，檢查表內上下層級的散總合計與表間勾稽；兩本各自獨立，可只放一本。PDF 只在瀏覽器內解析，不會上傳。</p>
     <div class="note">⚠ 這是提醒工具不是查核結論。「不符」可能是決算書的問題，也可能是解析錯，請回原頁確認；缺值標「無法驗」，不當 0。
         補助收入拆分取自基金總說明文字，其餘取自報表。</div>
+    <div class="drops">
+        <label class="drop">公務決算<small>拖曳 PDF 到這裡，或點選選檔</small><input type="file" id="gov" accept="application/pdf"></label>
+        <label class="drop">基金決算<small>拖曳 PDF 到這裡，或點選選檔</small><input type="file" id="fund" accept="application/pdf"></label>
+    </div>
     <div class="bar">
-        <label>公務決算 <input type="file" id="gov" accept="application/pdf"></label>
-        <label>基金決算 <input type="file" id="fund" accept="application/pdf"></label>
         <button id="run" disabled>解析並檢覈</button>
         <button id="xlsx" disabled>匯出 xlsx</button>
         <select id="filter" aria-label="明細篩選">
@@ -656,7 +665,18 @@ async function run() {
     }
     $('run').disabled = false;
 }
-const ready = () => { $('run').disabled = !$('gov').files.length && !$('fund').files.length; };
+const ready = () => {
+    $('run').disabled = !$('gov').files.length && !$('fund').files.length;
+    for (const input of [$('gov'), $('fund')]) {
+        const file = input.files[0], zone = input.parentElement;
+        zone.classList.toggle('has', !!file);
+        zone.querySelector('small').textContent = file ? file.name : '拖曳 PDF 到這裡，或點選選檔';
+    }
+};
+for (const input of [$('gov'), $('fund')]) {
+    for (const [ev, on] of [['dragenter', true], ['dragleave', false], ['drop', false]])
+        input.addEventListener(ev, () => input.parentElement.classList.toggle('over', on));
+}
 $('gov').addEventListener('change', ready);
 $('fund').addEventListener('change', ready);
 $('run').addEventListener('click', run);
