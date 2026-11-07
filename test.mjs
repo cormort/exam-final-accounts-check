@@ -86,16 +86,13 @@ assert.ok(api.runChecks(F0).every(r => r.group.startsWith('基金')));
 assert.ok(api.runChecks(G0).every(r => r.group.startsWith('公務')));
 assert.equal(api.runChecks(F0).length + api.runChecks(G0).length + 12, 80);
 
-// 表內散總：55 張表全部要讀得到，除下列外全部相符
+// 表內散總：55 張表全部要讀得到且全部相符（114 年第 41 頁主管列印全 0 只提醒）
 const tr = Object.entries(trees).flatMap(([y, ts]) => ts.flatMap(t => api.checkTree(t).map(r => ({ ...r, year: +y }))));
 const tcount = k => tr.filter(r => r.result === k).length;
 assert.equal(Object.values(trees).flat().length, 55);
 assert.equal(tcount('無法驗'), 0);
-const T41 = '114 以前年度歲出機關別轉入數決算表｜';   // PDF 第 41 頁：考試院主管列保留數欄全印 0，下層考選部列有數
-assert.deepEqual(tr.filter(r => r.result === '不符').map(r => `${r.year} ${r.name} ${r.diff}`), [
-    T41 + '考試院主管｜轉入保留：本列＝下層加總 -14830849', T41 + '考試院主管｜實現保留：本列＝下層加總 -13766074', T41 + '考試院主管｜未結清保留：本列＝下層加總 -1064775',
-    T41 + '小計｜轉入保留：小計＝該段最上層加總 14830849', T41 + '小計｜實現保留：小計＝該段最上層加總 13766074', T41 + '小計｜未結清保留：小計＝該段最上層加總 1064775',
-]);
+assert.deepEqual(tr.filter(r => r.result === '不符').map(r => `${r.year} ${r.name} ${r.diff}`), []);
+assert.deepEqual(tr.filter(r => r.result === '提醒').map(r => `${r.year} ${r.name}`), ['114 以前年度歲出機關別轉入數決算表｜考試院主管：標題列印成 0，通常應留白，金額不受影響（PDF 第 41 頁）']);
 // 否證：每格改動 1 元，不符數都要增加（防止某格根本沒被檢查）
 let cellFlips = 0;
 const unchecked = [];
@@ -108,8 +105,8 @@ for (const [y, ts] of Object.entries(trees)) for (const t of ts) {
         if (after > base) cellFlips++; else unchecked.push(`${y} ${t.title} ${r.name} [${t.cols[i]}] 第 ${r.page} 頁`);
     });
 }
-console.log(`表內散總：${tcount('相符')} 張表全部相符、${tcount('不符')} 格不符；改動 1 元被抓到 ${cellFlips} 格，未被檢查 ${unchecked.length} 格`);
-if (process.argv.includes('--dump')) console.log(unchecked.join('\n'));
+console.log(`表內散總：${tcount('相符')} 張表全部相符；改動 1 元被抓到 ${cellFlips} 格`);
+assert.deepEqual(unchecked, []);
 
 // 否證：每條規則的每個取數都改動 1 元，該規則都要變不符（防止比到同一個數或恆真）
 let flips = 0;

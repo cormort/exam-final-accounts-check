@@ -65,6 +65,7 @@
             <option value="">顯示全部</option>
             <option value="不符">只看不符</option>
             <option value="無法驗">只看無法驗</option>
+            <option value="提醒">只看提醒</option>
         </select>
     </div>
     <div id="msg" aria-live="polite"></div>
@@ -405,7 +406,9 @@ function govRow(left, right, a, yEnd) {
             else if (page === left && !name && !CODE_CELL.test(c.s.trim())) name = tidy(c.s);
         }
     }
-    return { lev: a.lev, name: a.lev < 0 ? a.code : name || a.code, n, page: left.no };
+    // 主管列是標題列不填金額，應留白；印成全 0 不算金額，但要提醒
+    const zeroHeader = n.length > 0 && /主管$/.test(name) && n.every(v => v === 0);
+    return { lev: a.lev, name: a.lev < 0 ? a.code : name || a.code, n: zeroHeader ? [] : n, zeroHeader, page: left.no };
 }
 function govTree(pages, t) {
     const rows = tablePages(pages, t.a, t.b).flatMap(({ left, right }) => {
@@ -473,6 +476,7 @@ function checkTree(t) {
         }),
         ...(bad.length ? [] : [line(`${t.title}：${cells} 格全部相符（${where}）`, side(null), side(null), 0, '相符')]),
         ...(skipped ? [line(`${t.title}：${skipped} 列欄數與表頭不符，未檢查`, side(null), side(null), null, '無法驗')] : []),
+        ...t.rows.filter(r => r.zeroHeader).map(r => line(`${t.title}｜${r.name}：標題列印成 0，通常應留白，金額不受影響（PDF 第 ${r.page} 頁）`, side(null), side(null), null, '提醒')),
     ];
 }
 const REV_COLS = ['原預算數', '預算增減數', '合計(1)', '實現數', '應收數', '保留數', '合計(2)', '比較增減'];
@@ -625,7 +629,7 @@ const sideText = s => s.parts.map(p => `${p.neg ? '−' : ''}${fmt(p.v)}${p.src 
 function render() {
     const c = k => results.filter(r => r.result === k).length;
     const f = $('filter').value, shown = f ? results.filter(r => r.result === f) : results;
-    let h = `<h2>${year} 年度：共 ${results.length} 項，相符 ${c('相符')}、不符 ${c('不符')}、無法驗 ${c('無法驗')}</h2>
+    let h = `<h2>${year} 年度：共 ${results.length} 項，相符 ${c('相符')}、不符 ${c('不符')}、無法驗 ${c('無法驗')}${c('提醒') ? `、提醒 ${c('提醒')}` : ''}</h2>
         <div class="scroll"><table><thead><tr><th>勾稽項目</th><th>左式</th><th>右式</th><th>差額</th><th>結果</th><th>出處</th></tr></thead><tbody>`;
     for (const g of new Set(shown.map(r => r.group))) {
         h += `<tr class="grp"><td colspan="6">${g}</td></tr>`;
