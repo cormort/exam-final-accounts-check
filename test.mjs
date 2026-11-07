@@ -34,7 +34,7 @@ assert.deepEqual([rs0.count, rs0.detail, rs0.total, rs0.diff], [3, [7, 0], [7, 1
 assert.deepEqual(api.valuesByColumn({ cells: [{ r: 201, s: '-' }, { r: 358, s: '-' }, { r: 408, s: '92,529,794' }] }, [209, 347, 408]), [0, null, -92529794]);
 
 const byYear = {}, trees = {}, more = [];
-for (const f of fs.readdirSync(path.join(ROOT, 'examples')).sort().reverse()) {   // 同年度公務表在前
+for (const f of fs.readdirSync(path.join(ROOT, 'examples')).filter(n => !n.includes('budget')).sort().reverse()) {   // 同年度公務表在前
     const r = await api.parseFile(new Uint8Array(fs.readFileSync(path.join(ROOT, 'examples', f))));
     assert.ok(r, '無法辨識 ' + f);
     (byYear[r.year] ??= {})[r.book] = r.facts;
@@ -132,6 +132,45 @@ assert.ok(await reminds('gov-114.pdf', 'G', ['歲入餘絀(或減免、註銷)�
 assert.ok(await reminds('fund-111.pdf', 'F', ['主要營運項目執行績效摘要表'], '主要營運項目') > 0);
 assert.ok(await reminds('fund-111.pdf', 'F', ['管制性項目及統計所需項目比較表'], '管制性項目') > 0);
 assert.ok(await reminds('fund-110.pdf', 'F', ['業務外收入明細表'], '業務外收入明細表') > 0);
+
+// 預算書
+const budget = [];
+for (const f of fs.readdirSync(path.join(ROOT, 'examples')).filter(n => n.includes('budget'))) {
+    const r = await api.parseFile(new Uint8Array(fs.readFileSync(path.join(ROOT, 'examples', f))));
+    assert.ok(r, '無法辨識 ' + f);
+    budget.push({ f, ...r });
+}
+assert.equal(budget.length, 17);
+{
+    let ok = 0, moved = 0, ruleFlips = 0;
+    const missed = [];
+    for (const b of budget) {
+        const all = [...api.runChecks(b.facts), ...b.trees.flatMap(t => api.checkTree(t)), ...b.more];
+        const wrong = all.filter(x => x.result !== '相符').map(x => `${b.f} ${x.result} ${x.name} ${x.diff}`);
+        assert.deepEqual(wrong, []);
+        ok += all.length;
+        // 否證：每條跨表規則的取數改動 1 元都要變不符（容許尾差的規則略過）
+        for (const [key, fact] of Object.entries(b.facts)) {
+            if (fact.v === null) continue;
+            const hit = api.runChecks(b.facts).filter(r => [...r.left.parts, ...r.right.parts].some(p => p.term.replace('-', '') === key));
+            fact.v += 1;
+            const after = api.runChecks(b.facts);
+            fact.v -= 1;
+            for (const h of hit) if (!/（決算）/.test(h.name)) { assert.equal(after.find(r => r.name === h.name).result, '不符', `${b.f} ${key} 改動後「${h.name}」仍相符`); ruleFlips++; }
+        }
+        // 否證：預算數改動 1 元要抓到（前年度決算欄容許尾差，略過）
+        for (const t of b.trees) for (const r of t.rows) r.n.forEach((v, i) => {
+            if (t.tol?.[i] !== undefined) return;
+            const before = api.checkTree(t).filter(x => x.result === '不符').length;
+            r.n[i] = v + 1;
+            const after = api.checkTree(t).filter(x => x.result === '不符').length;
+            r.n[i] = v;
+            if (after > before) moved++; else missed.push(`${t.title}｜${r.name}｜${t.cols[i]}`);
+        });
+    }
+    console.log(`預算書 ${budget.length} 本：${ok} 項全部相符；改動 1 元抓到 ${moved} 格，表內沒檢查到 ${missed.length} 格（餘絀撥補預計表的未分配賸餘、待填補短絀由跨表規則檢查）；跨表規則改動 ${ruleFlips} 次全部抓到`);
+    if (process.argv.includes('--dump')) console.log([...new Set(missed)].join('\n'));
+}
 
 // 否證：每條規則的每個取數都改動 1 元，該規則都要變不符（防止比到同一個數或恆真）
 let flips = 0;
