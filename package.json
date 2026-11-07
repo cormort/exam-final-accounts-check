@@ -1,0 +1,7 @@
+{
+  "name": "exam-final-accounts-check",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node test.mjs" },
+  "devDependencies": { "pdfjs-dist": "4.10.38" }
+}
