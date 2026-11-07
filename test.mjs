@@ -1,5 +1,5 @@
 // 回歸測試：抽出 index.html 的模組腳本，在 Node 對 決算/ 下 110–114 五個年度的 PDF 跑同一份邏輯。
-// 工具本身一次只看一個年度；跨年度規則只放在這裡，用來驗證解析沒取錯。
+// 工具本身一次只看一本；跨年度規則只放在這裡，用來驗證解析沒取錯。
 // PDF 不進版控，本機才能跑。  npm install && npm test
 //   node test.mjs --dump   印出所有非「相符」項與出處
 import fs from 'node:fs';
@@ -16,7 +16,7 @@ const src = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1]
     .replace(/from 'https:\/\/cdnjs[^']*pdf\.min\.mjs'/, "from 'pdfjs-dist/legacy/build/pdf.mjs'")
     .replace(/^.*GlobalWorkerOptions.*$/m, '')
     .replace('https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/cmaps/', path.join(ROOT, 'node_modules/pdfjs-dist/cmaps/'))
-    .concat('\nexport { parseFile, runChecks, evalRule, amt, toNum, valuesByColumn };\n');
+    .concat('\nexport { parseFile, runChecks, evalRule, checkTree, amt, toNum, valuesByColumn };\n');
 const bundle = path.join(ROOT, '.bundle.mjs');
 fs.writeFileSync(bundle, src);
 const api = await import(pathToFileURL(bundle));
@@ -28,12 +28,13 @@ assert.equal(api.amt('5,450萬'), 54500000);
 assert.equal(api.toNum('- 2,658,110'), -2658110);
 assert.deepEqual(api.valuesByColumn({ cells: [{ r: 201, s: '-' }, { r: 358, s: '-' }, { r: 408, s: '92,529,794' }] }, [209, 347, 408]), [0, null, -92529794]);
 
-const byYear = {};
+const byYear = {}, trees = {};
 for (const dir of ['決算/公務決算', '決算/考選基金決算']) {
     for (const f of fs.readdirSync(path.join(ROOT, dir)).filter(n => n.endsWith('.pdf'))) {
         const r = await api.parseFile(new Uint8Array(fs.readFileSync(path.join(ROOT, dir, f))));
         assert.ok(r, '無法辨識 ' + f);
         (byYear[r.year] ??= {})[r.book] = r.facts;
+        (trees[r.year] ??= []).push(...r.trees);
     }
 }
 // 上年度欄＝前一本的本年度：同一數字由兩本 PDF 各取一次，對得上才算沒取錯
@@ -80,6 +81,37 @@ assert.deepEqual(rs.filter(r => r.result === '無法驗').map(r => `${r.year} ${
     '110 現金流量增加無形資產＝無形資產明細表決算', '111 現金流量增加無形資產＝無形資產明細表決算',   // 這兩年沒有此表
 ]);
 assert.equal(summary.total, 5 * 80 + 4 * 8);   // 每年 80 條＋4 組相鄰年度各 8 條
+
+// 兩本各自獨立：只放一本時不跑另一本與跨書規則
+const F0 = byYear[114].F, G0 = byYear[114].G;
+assert.ok(api.runChecks(F0).every(r => r.group.startsWith('基金')));
+assert.ok(api.runChecks(G0).every(r => r.group.startsWith('公務')));
+assert.equal(api.runChecks(F0).length + api.runChecks(G0).length + 12, 80);
+
+// 表內散總：55 張表全部要讀得到，除下列外全部相符
+const tr = Object.entries(trees).flatMap(([y, ts]) => ts.flatMap(t => api.checkTree(t).map(r => ({ ...r, year: +y }))));
+const tcount = k => tr.filter(r => r.result === k).length;
+assert.equal(Object.values(trees).flat().length, 55);
+assert.equal(tcount('無法驗'), 0);
+const T41 = '114 以前年度歲出機關別轉入數決算表｜';   // PDF 第 41 頁：考試院主管列保留數欄全印 0，下層考選部列有數
+assert.deepEqual(tr.filter(r => r.result === '不符').map(r => `${r.year} ${r.name} ${r.diff}`), [
+    T41 + '考試院主管｜轉入保留：本列＝下層加總 -14830849', T41 + '考試院主管｜實現保留：本列＝下層加總 -13766074', T41 + '考試院主管｜未結清保留：本列＝下層加總 -1064775',
+    T41 + '小計｜轉入保留：小計＝該段最上層加總 14830849', T41 + '小計｜實現保留：小計＝該段最上層加總 13766074', T41 + '小計｜未結清保留：小計＝該段最上層加總 1064775',
+]);
+// 否證：每格改動 1 元，不符數都要增加（防止某格根本沒被檢查）
+let cellFlips = 0;
+const unchecked = [];
+for (const [y, ts] of Object.entries(trees)) for (const t of ts) {
+    const base = api.checkTree(t).filter(r => r.result === '不符').length;
+    for (const r of t.rows) r.n.forEach((v, i) => {
+        r.n[i] = v + 1;
+        const after = api.checkTree(t).filter(x => x.result === '不符').length;
+        r.n[i] = v;
+        if (after > base) cellFlips++; else unchecked.push(`${y} ${t.title} ${r.name} [${t.cols[i]}] 第 ${r.page} 頁`);
+    });
+}
+console.log(`表內散總：${tcount('相符')} 張表全部相符、${tcount('不符')} 格不符；改動 1 元被抓到 ${cellFlips} 格，未被檢查 ${unchecked.length} 格`);
+if (process.argv.includes('--dump')) console.log(unchecked.join('\n'));
 
 // 否證：每條規則的每個取數都改動 1 元，該規則都要變不符（防止比到同一個數或恆真）
 let flips = 0;

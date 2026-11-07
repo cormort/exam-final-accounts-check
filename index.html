@@ -39,13 +39,13 @@
 <body>
 <div class="container">
     <h1>考選部決算勾稽工具</h1>
-    <p>上傳同一年度的考選部單位決算（公務）與考選業務基金附屬單位決算，逐項驗算兩本之間與各表之間的數字。PDF 只在瀏覽器內解析，不會上傳。</p>
+    <p>上傳一本考選部單位決算（公務）或考選業務基金附屬單位決算，檢查表內上下層級的散總合計與表間勾稽；兩本各自獨立，可只放一本。PDF 只在瀏覽器內解析，不會上傳。</p>
     <div class="note">⚠ 這是提醒工具不是查核結論。「不符」可能是決算書的問題，也可能是解析錯，請回原頁確認；缺值標「無法驗」，不當 0。
         補助收入拆分取自基金總說明文字，其餘取自報表。</div>
     <div class="bar">
         <label>公務決算 <input type="file" id="gov" accept="application/pdf"></label>
         <label>基金決算 <input type="file" id="fund" accept="application/pdf"></label>
-        <button id="run" disabled>解析並勾稽</button>
+        <button id="run" disabled>解析並檢覈</button>
         <button id="xlsx" disabled>匯出 xlsx</button>
         <select id="filter" aria-label="明細篩選">
             <option value="">顯示全部</option>
@@ -360,10 +360,136 @@ function govFacts(pages) {
     return facts;
 }
 
+// ===== 表內散總：上層＝下層加總、列內欄位公式、小計合計 =====
+const CODE_CELL = /(?:^|\s)(ˉ*)(\d{10}-\d\*?)$|^(ˉ{3,})(\d{2,4})$/;
+const TOTAL_ROW = /^(經常門小計|資本門小計|統籌科目小計|小計|合計|實現數|應付數|保留數)$/;
+const intOf = s => (s.includes('.') ? null : toNum(s));
+const BODY_BOTTOM = 50;   // 頁碼以下不算表身
+
+// 公務：款項目節代碼前的 ˉ 數就是層級；一筆資料可佔兩行，左右頁同高
+function govAnchors(page) {
+    const out = [];
+    for (const row of page.rows) {
+        if (row.y < BODY_BOTTOM) continue;
+        const code = row.cells.map(c => ({ c, m: c.s.trim().match(CODE_CELL) })).find(h => h.m);
+        if (code) { out.push({ y: row.y, x: code.c.x, lev: (code.m[1] ?? code.m[3]).length, code: code.m[2] ?? code.m[4] }); continue; }
+        const label = row.cells.filter(c => intOf(c.s) === null);
+        const name = tidy(label.map(c => c.s).join(''));
+        if (TOTAL_ROW.test(name) && label.length < row.cells.length) out.push({ y: row.y, x: Math.max(...label.map(c => c.r)), lev: -1, code: name });
+    }
+    return out;
+}
+function govRow(left, right, a, yEnd) {
+    const n = [];
+    let name = '';
+    for (const page of [left, right]) for (const row of page.rows) {
+        if (row.y <= yEnd + 1 || row.y > a.y + 3 || row.y < BODY_BOTTOM) continue;
+        for (const c of row.cells) {
+            if (page === left && c.x < a.x - 1) continue;
+            const v = intOf(c.s);
+            if (v !== null) n.push(v);
+            else if (page === left && !name && !CODE_CELL.test(c.s.trim())) name = tidy(c.s);
+        }
+    }
+    return { lev: a.lev, name: a.lev < 0 ? a.code : name || a.code, n, page: left.no };
+}
+function govTree(pages, t) {
+    const rows = tablePages(pages, t.a, t.b).flatMap(({ left, right }) => {
+        const an = govAnchors(left);
+        return an.map((a, i) => govRow(left, right, a, an[i + 1]?.y ?? a.y - 28));
+    });
+    return { ...t, rows };
+}
+// 基金：科目縮排就是層級，負號與 0 的處理同 valuesByColumn
+function fundTree(pages, t) {
+    const raw = tablePages(pages, t.title).flatMap(p => p.rows.flatMap(row => {
+        const seg = row.segs.find(s => s.label && s.cells.length);
+        if (row.y < BODY_BOTTOM || !seg || row.cells[0].x > 200) return [];
+        return [{ x: row.cells[0].x, name: seg.label, n: valuesByColumn(seg, p.cols).slice(0, t.cols.length).map(v => v ?? 0), page: p.no }];
+    }));
+    const edges = [...new Set(raw.filter(r => !TOTAL_ROW.test(r.name)).map(r => r.x))].sort((a, b) => a - b)
+        .reduce((l, x) => (l.length && x - l.at(-1) <= 3 ? l : [...l, x]), []);
+    const rows = raw.map(r => ({ ...r, lev: TOTAL_ROW.test(r.name) ? -1 : edges.filter(e => e <= r.x + 0.5).length - 1 }));
+    return { ...t, rows };
+}
+function checkTree(t) {
+    const w = t.cols.length, ok = r => r.n.length === w;
+    const bad = [];
+    let cells = 0;
+    const cmp = (r, label, a, b) => { cells++; if (a !== b) bad.push({ r, label, a, b }); };
+    t.rows.forEach((p, i) => {
+        if (p.lev >= 0 && ok(p)) {
+            let kids = [], min = Infinity;
+            for (let j = i + 1; j < t.rows.length && t.rows[j].lev > p.lev; j++) {
+                const k = t.rows[j];
+                if (!ok(k)) continue;
+                if (k.lev < min) { min = k.lev; kids = [k]; } else if (k.lev === min) kids.push(k);
+            }
+            if (kids.length) t.cols.forEach((c, x) => cmp(p, `${c}：本列＝下層加總`, p.n[x], sum(kids.map(k => k.n[x]))));
+        }
+        if (ok(p)) for (const [label, a, b] of t.formula?.(p.n) ?? []) cmp(p, label, a, b);
+    });
+    // 小計＝該段最上層列；合計＝各段；經常門＋資本門＝其合計或所屬列
+    const eq = (p, what, parts) => t.cols.forEach((c, x) => cmp(p, `${c}：${what}`, p.n[x], sum(parts.map(k => k.n[x]))));
+    const roots = seg => seg.filter(r => r.lev === Math.min(...seg.map(k => k.lev)));
+    let seg = [], subs = [];
+    t.rows.forEach((r, i) => {
+        if (!ok(r)) return;
+        if (r.lev >= 0) { seg.push(r); return; }
+        if (r.name === '資本門小計' && t.rows[i - 1]?.name === '經常門小計') {
+            const owner = t.rows[i + 1]?.name === '合計' ? t.rows[i + 1] : t.rows[i - 2];
+            if (owner && ok(owner)) eq(owner, '本列＝經常門＋資本門小計', [t.rows[i - 1], r]);
+        }
+        if (/門小計$/.test(r.name)) return;
+        if (r.name === '合計') { eq(r, '合計＝各段加總', [...subs, ...roots(seg)]); seg = []; subs = []; return; }
+        if (seg.length) eq(r, `${r.name}＝該段最上層加總`, roots(seg));
+        subs.push(r); seg = seg.slice(0, seg.indexOf(roots(seg)[0]));   // 統籌科目小計之前的機關列留給合計
+    });
+    const group = t.book === 'F' ? '基金：表內散總' : '公務：表內散總';
+    const pgs = [...new Set(t.rows.map(r => r.page))];
+    const where = pgs.length ? `PDF 第 ${pgs[0]}${pgs.length > 1 ? '–' + pgs.at(-1) : ''} 頁` : '';
+    const side = (v, src) => ({ v, parts: src ? [{ term: '', v, src, neg: false }] : [] });
+    const line = (name, l, r, diff, result) => ({ group, name, left: l, right: r, diff, result });
+    if (!cells) return [line(`${t.title}：找不到可檢查的列`, side(null), side(null), null, '無法驗')];
+    const skipped = t.rows.filter(r => r.n.length && !ok(r)).length;
+    return [
+        ...bad.map(({ r, label, a, b }) => {
+            const src = `${t.title}（PDF 第 ${r.page} 頁）`;
+            return line(`${t.title}｜${r.name}｜${label}`, side(a, src), side(b, src), a - b, '不符');
+        }),
+        ...(bad.length ? [] : [line(`${t.title}：${cells} 格全部相符（${where}）`, side(null), side(null), 0, '相符')]),
+        ...(skipped ? [line(`${t.title}：${skipped} 列欄數與表頭不符，未檢查`, side(null), side(null), null, '無法驗')] : []),
+    ];
+}
+const REV_COLS = ['原預算數', '預算增減數', '合計(1)', '實現數', '應收數', '保留數', '合計(2)', '比較增減'];
+const EXP_COLS = ['原預算數', '預算追加(減)', '動支第二預備金', '預算調整', '動支第一預備金', '經費流用', '增減小計', '合計(1)', '實現數', '保留數', '比較增減', '應付數', '合計(2)'];
+const EXP_ROW = n => [
+    ['增減小計＝各增減項', n[6], sum(n.slice(1, 6))], ['合計(1)＝原預算＋增減小計', n[7], n[0] + n[6]],
+    ['合計(2)＝實現＋應付＋保留', n[12], n[8] + n[9] + n[11]], ['比較增減＝合計(2)−合計(1)', n[10], n[12] - n[7]],
+];
+const PRIOR_COLS = ['轉入應付', '減免應付', '轉入保留', '減免保留', '實現應付', '調整應付', '未結清應付', '實現保留', '調整保留', '未結清保留'];
+const GOV_TREES = [
+    { title: '歲入來源別決算表', a: '歲入來源', b: '別決算表', cols: REV_COLS, formula: n => [
+        ['合計(1)＝原預算＋增減', n[2], n[0] + n[1]], ['合計(2)＝實現＋應收＋保留', n[6], n[3] + n[4] + n[5]], ['比較增減＝合計(2)−合計(1)', n[7], n[6] - n[2]]] },
+    { title: '歲出政事別決算表', a: '歲出政事', b: '別決算表', cols: EXP_COLS, formula: EXP_ROW },
+    { title: '歲出機關別決算表', a: '歲出機關', b: '別決算表', cols: EXP_COLS, formula: EXP_ROW },
+    { title: '以前年度歲出政事別轉入數決算表', a: '以前年度歲出政事', b: '別轉入數決算表', cols: PRIOR_COLS },
+    { title: '以前年度歲出機關別轉入數決算表', a: '以前年度歲出機關', b: '別轉入數決算表', cols: PRIOR_COLS },
+    { title: '歲出用途別決算分析表', a: '歲出用途別', b: '決算分析表', cols: ['人事費', '業務費', '獎補助費', '債務費', '經常小計', '資本業務費', '設備及投資', '資本獎補助費', '資本小計', '合計'], formula: n => [
+        ['經常小計＝各項', n[4], sum(n.slice(0, 4))], ['資本小計＝各項', n[8], sum(n.slice(5, 8))], ['合計＝經常＋資本', n[9], n[4] + n[8]]] },
+];
+const FUND_COLS = ['預算數', '決算數', '比較增減'];
+const FUND_ROW = n => [['比較增減＝決算−預算', n[2], n[1] - n[0]]];
+const FUND_TREES = ['業務收入明細表', '業務外收入明細表', '業務成本與費用明細表', '業務外費用明細表', '各項費用彙計表']
+    .map(title => ({ title, cols: FUND_COLS, formula: FUND_ROW }));
+const treesOf = (book, pages) => (book === 'F'
+    ? FUND_TREES.map(t => fundTree(pages, { ...t, book }))
+    : GOV_TREES.map(t => govTree(pages, { ...t, book })));
+
 // ===== 勾稽規則：左式＝右式，「-」開頭為減項 =====
 const RULES = [];
 const rule = (group, name, left, right) => RULES.push({ group, name, left, right });
-const X = '一、公務↔基金（跨書）', F = '二、基金決算表間', G = '三、公務決算表間';
+const X = '公務↔基金（兩本都上傳才有）', F = '基金：跨表勾稽', G = '公務：跨表勾稽';
 
 rule(X, '長期投資（本年度）＝基金淨值', ['G.平衡.長期投資.本'], ['F.平衡.淨值.本']);
 rule(X, '長期投資（上年度）＝基金淨值上年度', ['G.平衡.長期投資.上'], ['F.平衡.淨值.上']);
@@ -450,7 +576,12 @@ function evalRule(r, facts) {
     const diff = left.v === null || right.v === null ? null : left.v - right.v;
     return { group: r.group, name: r.name, left, right, diff, result: diff === null ? '無法驗' : diff === 0 ? '相符' : '不符' };
 }
-const runChecks = facts => RULES.map(r => evalRule(r, facts));
+// 兩本各自獨立：只跑已上傳那本的規則
+function runChecks(facts) {
+    const has = { F: 'F.平衡.資產.本' in facts, G: 'G.平衡.資產.本' in facts };
+    const on = r => (r.group === X ? has.F && has.G : has[r.group === F ? 'F' : 'G']);
+    return RULES.filter(on).map(r => evalRule(r, facts));
+}
 
 // ===== 檔案 → 年度 =====
 function classify(pages) {
@@ -467,7 +598,7 @@ async function parseFile(data) {
     await doc.destroy();
     const kind = classify(pages);
     if (!kind) return null;
-    return { ...kind, facts: kind.book === 'F' ? fundFacts(pages) : govFacts(pages) };
+    return { ...kind, facts: kind.book === 'F' ? fundFacts(pages) : govFacts(pages), trees: treesOf(kind.book, pages) };
 }
 
 // ===== 畫面 =====
@@ -515,8 +646,9 @@ async function run() {
         if (parsed.length === 2 && parsed[0].book === parsed[1].book) throw new Error('兩份是同一種決算書，請各放一份公務、基金');
         if (parsed.length === 2 && parsed[0].year !== parsed[1].year) throw new Error(`年度不同：${parsed[0].year} 與 ${parsed[1].year}`);
         year = parsed[0].year;
-        results = runChecks(Object.assign({}, ...parsed.map(p => p.facts)));
-        say(parsed.length === 2 ? '完成' : `只放了${parsed[0].book === 'F' ? '基金' : '公務'}決算，涉及另一本的項目標無法驗`);
+        const checks = runChecks(Object.assign({}, ...parsed.map(p => p.facts)));
+        results = [...parsed.flatMap(p => p.trees.flatMap(checkTree)), ...checks.filter(r => r.group !== X), ...checks.filter(r => r.group === X)];
+        say('完成');
         render();
         $('xlsx').disabled = false;
     } catch (e) {
