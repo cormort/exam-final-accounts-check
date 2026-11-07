@@ -27,6 +27,8 @@
     .drop.has { border-style: solid; border-color: var(--success-600); }
     /* 透明的原生檔案欄蓋滿整區：點選、拖放、鍵盤都由瀏覽器處理 */
     .drop input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+    #samples { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; color: var(--fg-500); font-size: 13px; }
+    #samples button { height: 30px; padding: 0 10px; color: var(--primary); background: var(--default-100); font-size: 13px; }
     .bar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 14px 0; }
     button { padding: 0 16px; height: 38px; color: #fff; background: var(--primary); border: none; border-radius: var(--r-md); cursor: pointer; font-size: 14px; }
     button:disabled { opacity: .45; cursor: default; }
@@ -52,6 +54,9 @@
     <div class="drops">
         <label class="drop">公務決算<small>拖曳 PDF 到這裡，或點選選檔</small><input type="file" id="gov" accept="application/pdf"></label>
         <label class="drop">基金決算<small>拖曳 PDF 到這裡，或點選選檔</small><input type="file" id="fund" accept="application/pdf"></label>
+    </div>
+    <div id="samples">沒有檔案？載入範例（公務＋基金）：
+        <button data-year="110">110 年度</button><button data-year="111">111 年度</button><button data-year="112">112 年度</button><button data-year="113">113 年度</button><button data-year="114">114 年度</button>
     </div>
     <div class="bar">
         <button id="run" disabled>解析並檢覈</button>
@@ -673,6 +678,21 @@ const ready = () => {
         zone.querySelector('small').textContent = file ? file.name : '拖曳 PDF 到這裡，或點選選檔';
     }
 };
+async function loadSample(y) {
+    say(`下載 ${y} 年度範例…`);
+    try {
+        for (const [id, book, name] of [['gov', 'gov', '公務決算'], ['fund', 'fund', '考選業務基金決算']]) {
+            const res = await fetch(`examples/${book}-${y}.pdf`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const box = new DataTransfer();
+            box.items.add(new File([await res.blob()], `${y}年度${name}（範例）.pdf`, { type: 'application/pdf' }));
+            $(id).files = box.files;
+        }
+    } catch (e) { say('載入範例失敗：' + e.message, true); return; }
+    ready();
+    run();
+}
+$('samples').addEventListener('click', e => { if (e.target.dataset.year) loadSample(e.target.dataset.year); });
 for (const input of [$('gov'), $('fund')]) {
     for (const [ev, on] of [['dragenter', true], ['dragleave', false], ['drop', false]])
         input.addEventListener(ev, () => input.parentElement.classList.toggle('over', on));

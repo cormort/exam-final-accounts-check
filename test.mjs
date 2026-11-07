@@ -1,6 +1,6 @@
-// 回歸測試：抽出 index.html 的模組腳本，在 Node 對 決算/ 下 110–114 五個年度的 PDF 跑同一份邏輯。
+// 回歸測試：抽出 index.html 的模組腳本，在 Node 對 examples/ 下 110–114 五個年度的 PDF 跑同一份邏輯。
 // 工具本身一次只看一本；跨年度規則只放在這裡，用來驗證解析沒取錯。
-// PDF 不進版控，本機才能跑。  npm install && npm test
+//   npm install && npm test
 //   node test.mjs --dump   印出所有非「相符」項與出處
 import fs from 'node:fs';
 import path from 'node:path';
@@ -29,13 +29,11 @@ assert.equal(api.toNum('- 2,658,110'), -2658110);
 assert.deepEqual(api.valuesByColumn({ cells: [{ r: 201, s: '-' }, { r: 358, s: '-' }, { r: 408, s: '92,529,794' }] }, [209, 347, 408]), [0, null, -92529794]);
 
 const byYear = {}, trees = {};
-for (const dir of ['決算/公務決算', '決算/考選基金決算']) {
-    for (const f of fs.readdirSync(path.join(ROOT, dir)).filter(n => n.endsWith('.pdf'))) {
-        const r = await api.parseFile(new Uint8Array(fs.readFileSync(path.join(ROOT, dir, f))));
-        assert.ok(r, '無法辨識 ' + f);
-        (byYear[r.year] ??= {})[r.book] = r.facts;
-        (trees[r.year] ??= []).push(...r.trees);
-    }
+for (const f of fs.readdirSync(path.join(ROOT, 'examples')).sort().reverse()) {   // 同年度公務表在前
+    const r = await api.parseFile(new Uint8Array(fs.readFileSync(path.join(ROOT, 'examples', f))));
+    assert.ok(r, '無法辨識 ' + f);
+    (byYear[r.year] ??= {})[r.book] = r.facts;
+    (trees[r.year] ??= []).push(...r.trees);
 }
 // 上年度欄＝前一本的本年度：同一數字由兩本 PDF 各取一次，對得上才算沒取錯
 const Y = '跨年度（僅驗證用）';
